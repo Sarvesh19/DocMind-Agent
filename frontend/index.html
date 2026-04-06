@@ -9,12 +9,14 @@
   <link rel="stylesheet" href="/static/css/main.css" />
 </head>
 <body>
-  <!-- Ambient background -->
   <div class="bg-orbs">
     <div class="orb orb-1"></div>
     <div class="orb orb-2"></div>
     <div class="orb orb-3"></div>
   </div>
+
+  <!-- Backdrop: tapping this closes the sidebar on mobile -->
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
 
   <div class="app-shell">
     <!-- ── Sidebar ── -->
@@ -27,13 +29,12 @@
         <div class="logo-tag">v2.0</div>
       </div>
 
-      <!-- Stats -->
       <div class="stat-row">
-        <div class="stat-pill" id="stat-docs">
+        <div class="stat-pill">
           <span class="stat-num" id="count-docs">—</span>
           <span class="stat-lbl">docs</span>
         </div>
-        <div class="stat-pill" id="stat-chunks">
+        <div class="stat-pill">
           <span class="stat-num" id="count-chunks">—</span>
           <span class="stat-lbl">chunks</span>
         </div>
@@ -43,7 +44,6 @@
         </div>
       </div>
 
-      <!-- Upload zone -->
       <div class="section-label">Knowledge Base</div>
       <div class="upload-zone" id="uploadZone">
         <div class="upload-icon">⬆</div>
@@ -54,13 +54,11 @@
       </div>
       <div id="uploadProgress" class="upload-progress hidden"></div>
 
-      <!-- Document list -->
       <div class="section-label" style="margin-top:1.5rem">Indexed Sources</div>
       <div class="doc-list" id="docList">
         <div class="doc-empty">No documents yet</div>
       </div>
 
-      <!-- Tools -->
       <div class="section-label" style="margin-top:1.5rem">Tools</div>
       <div class="tools-grid">
         <div class="tool-chip">🔍 KB Search</div>
@@ -77,23 +75,20 @@
 
     <!-- ── Main panel ── -->
     <main class="main-panel">
-      <!-- Top bar -->
       <header class="topbar">
-        <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">☰</button>
+        <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Toggle menu">☰</button>
         <div class="topbar-center">
           <span class="topbar-title">Document Intelligence Agent</span>
         </div>
         <div class="session-badge" id="sessionBadge">—</div>
       </header>
 
-      <!-- Chat messages -->
       <div class="chat-area" id="chatArea">
-        <!-- Welcome card -->
         <div class="welcome-card" id="welcomeCard">
           <div class="welcome-glyph">⬡</div>
           <h2>Hello, I'm DocMind</h2>
           <p>Upload your documents and ask me anything. I'll search, reason, and cite my sources.</p>
-          <div class="quick-actions" id="quickActions">
+          <div class="quick-actions">
             <button class="quick-btn" onclick="sendQuick('What documents are currently uploaded?')">What's uploaded?</button>
             <button class="quick-btn" onclick="sendQuick('Search the web for latest AI news')">Latest AI news</button>
             <button class="quick-btn" onclick="sendQuick('Calculate compound interest: principal 50000, rate 8%, years 10')">Compound interest</button>
@@ -101,23 +96,15 @@
         </div>
       </div>
 
-      <!-- Thinking indicator -->
       <div class="thinking-bar hidden" id="thinkingBar">
         <div class="thinking-dots"><span></span><span></span><span></span></div>
         <span class="thinking-text" id="thinkingText">Thinking…</span>
       </div>
 
-      <!-- Input area -->
       <div class="input-area">
         <div class="input-wrap">
-          <textarea
-            id="msgInput"
-            class="msg-input"
-            placeholder="Ask anything about your documents…"
-            rows="1"
-            onkeydown="handleKey(event)"
-            oninput="autoResize(this)"
-          ></textarea>
+          <textarea id="msgInput" class="msg-input" placeholder="Ask anything about your documents…"
+            rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
           <button class="send-btn" id="sendBtn" onclick="sendMessage()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <line x1="22" y1="2" x2="11" y2="13"></line>

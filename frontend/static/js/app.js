@@ -301,9 +301,35 @@ async function deleteDoc(name) {
 }
 
 /* ── UI helpers ───────────────────────────────────────────────────────────── */
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('collapsed');
+function isMobile() {
+  return window.innerWidth <= 700;
 }
+
+function toggleSidebar() {
+  if (isMobile()) {
+    const sb = document.getElementById('sidebar');
+    sb.classList.contains('mobile-open') ? closeSidebar() : openSidebar();
+  } else {
+    document.getElementById('sidebar').classList.toggle('collapsed');
+  }
+}
+
+function openSidebar() {
+  document.getElementById('sidebar').classList.add('mobile-open');
+  document.getElementById('sidebarBackdrop').classList.add('active');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('sidebarBackdrop').classList.remove('active');
+  document.body.style.overflow = '';
+}
+
+// Close on Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeSidebar();
+});
 
 function setStreaming(val) {
   isStreaming = val;

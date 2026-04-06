@@ -199,7 +199,9 @@ body {
 .sidebar-toggle {
   background: none; border: 1px solid var(--border); color: var(--text-3);
   border-radius: 7px; padding: 0.35rem 0.65rem; cursor: pointer;
-  font-size: 0.9rem; transition: all 0.2s; flex-shrink: 0;
+  font-size: 1.1rem; transition: all 0.2s; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  min-width: 36px; min-height: 36px;
 }
 .sidebar-toggle:hover { color: var(--text); border-color: var(--border2); }
 .topbar-center { flex: 1; text-align: center; }
@@ -378,13 +380,66 @@ body {
 /* ── Utilities ─────────────────────────────────────────────────────────────── */
 .hidden { display: none !important; }
 
-/* ── Responsive ─────────────────────────────────────────────────────────────── */
+/* ── Sidebar backdrop ────────────────────────────────────────────────────────── */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 99;   /* below sidebar (200) but above everything else */
+}
+.sidebar-backdrop.active { display: block; }
+
+/* ── Desktop ─────────────────────────────────────────────────────────────────── */
+@media (min-width: 701px) {
+  .sidebar { transition: width 0.3s ease, opacity 0.3s ease, padding 0.3s ease; }
+  .sidebar.collapsed { width: 0; opacity: 0; pointer-events: none; padding: 0; overflow: hidden; }
+  .sidebar-backdrop { display: none !important; }
+}
+
+/* ── Mobile ──────────────────────────────────────────────────────────────────── */
 @media (max-width: 700px) {
-  :root { --sidebar-w: 260px; }
-  .sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 100; }
-  .sidebar.collapsed { transform: translateX(-100%); opacity: 1; width: var(--sidebar-w); pointer-events: none; }
-  .sidebar:not(.collapsed) { pointer-events: all; }
+  :root { --sidebar-w: 285px; }
+
+  /* Topbar always visible, always on top */
+  .topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 300;
+    padding: 0.7rem 1rem;
+  }
+
+  /* Push chat content below the fixed topbar */
+  .main-panel { padding-top: 56px; }
+
+  /* Sidebar: fixed drawer, hidden off-screen by default */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    z-index: 200;
+    width: var(--sidebar-w) !important;
+    transform: translateX(-100%);
+    transition: transform 0.26s cubic-bezier(0.4,0,0.2,1);
+    opacity: 1 !important;
+    padding: 1.5rem 1.25rem !important;
+    overflow-y: auto;
+  }
+
+  /* Open state */
+  .sidebar.mobile-open { transform: translateX(0); }
+
+  /* Hamburger: always large and visible */
+  .sidebar-toggle {
+    display: flex !important;
+    align-items: center; justify-content: center;
+    min-width: 42px; min-height: 42px;
+    font-size: 1.3rem;
+    color: var(--text) !important;
+    border-color: var(--border2) !important;
+  }
+
   .chat-area { padding: 1rem; }
-  .topbar { padding: 0.75rem 1rem; }
-  .input-area { padding: 0.75rem 1rem; }
+  .input-area { padding: 0.75rem 1rem 1rem; }
+  .input-hint { display: none; }
+  .session-badge { font-size: 0.6rem; }
 }

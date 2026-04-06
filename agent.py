@@ -1,60 +1,76 @@
 import operator
 import logging
-from typing import TypedDict, Annotated, List, Literal, AsyncGenerator
+from typing import TypedDict, Annotated, List, Literal
+
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage
 from langchain_core.tools import tool
-from vector_store import SupabaseVectorStore
-from config import GROQ_API_KEY, GROQ_MODEL, OPENROUTER_API_KEY
+from config import *
 
 logger = logging.getLogger(__name__)
-_store: SupabaseVectorStore | None = None
 
-def get_store() -> SupabaseVectorStore:
+_store = None
+def get_store():
     global _store
     if _store is None:
+        from vector_store import SupabaseVectorStore
         _store = SupabaseVectorStore()
     return _store
 
-# ------------------ Tools ------------------
+# ── Tools (optimized for size limits) ─────────────────────────────────────────
+
 @tool
 def search_knowledge_base(query: str) -> str:
-    """Search uploaded documents for information relevant to the query. Always try this first."""
-    results = get_store().similarity_search(query)
+    """
+    Search the uploaded documents knowledge base.
+    Returns at most 4 chunks, each truncated to 800 chars.
+    """
+    results = get_store().similarity_search(query, k=4)   # fewer chunks
     if not results:
-        return "No relevant information found in the knowledge base."
+        return "NO_RESULTS: No information found in the knowledge base for this query."
     parts = []
     for i, r in enumerate(results, 1):
         src = (r.get("metadata") or {}).get("source", "unknown")
-        parts.append(f"[{i}] Source: {src} (score: {r.get('similarity', 0):.2f})\n{r['content']}")
+        content = r['content']
+        if len(content) > 800:
+            content = content[:800] + "... [truncated]"
+        parts.append(f"[Chunk {i}] Source: {src} | Similarity: {r.get('similarity', 0):.2f}\n{content}")
     return "\n\n---\n\n".join(parts)
 
 @tool
 def web_search(query: str) -> str:
-    """Search the web for current or external information not in the documents."""
+    """
+    Search the internet for current, real-time, or additional information.
+    Use when KB has no results or user asks for latest news.
+    """
     import requests
     try:
         resp = requests.get("https://api.duckduckgo.com/",
-            params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"}, timeout=8)
+            params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"}, timeout=10)
         data = resp.json()
         snippets = []
         if data.get("AbstractText"):
-            snippets.append(data["AbstractText"])
+            snippets.append(f"Summary: {data['AbstractText']}")
         for t in data.get("RelatedTopics", [])[:4]:
             if isinstance(t, dict) and t.get("Text"):
                 snippets.append(t["Text"])
-        return "Web results:\n" + "\n\n".join(snippets) if snippets else f"No web results for: {query}"
+        if snippets:
+            return "Web search results:\n\n" + "\n\n".join(snippets)
+        if data.get("Answer"):
+            return f"Answer: {data['Answer']}"
+        return f"No web results found for: {query}."
     except Exception as e:
         return f"Web search error: {e}"
 
 @tool
 def calculator(expression: str) -> str:
-    """Evaluate a mathematical expression. Supports +,-,*,/,**,sqrt,abs,round,min,max."""
+    """Evaluate a mathematical expression."""
     import math
     safe = {"__builtins__": {}, "sqrt": math.sqrt, "abs": abs, "round": round,
-            "min": min, "max": max, "sum": sum, "log": math.log, "pi": math.pi, "e": math.e}
+            "min": min, "max": max, "sum": sum, "log": math.log, "log10": math.log10,
+            "pi": math.pi, "e": math.e, "pow": pow}
     try:
         return f"Result: {eval(expression, safe)}"
     except Exception as exc:
@@ -62,82 +78,92 @@ def calculator(expression: str) -> str:
 
 @tool
 def summarise_document(source_name: str) -> str:
-    """Generate a structured summary of a specific uploaded document by its filename."""
+    """Retrieve and summarise a specific uploaded document."""
     store = get_store()
-    results = store.similarity_search(f"main topics key points summary {source_name}", k=8, threshold=0.2)
+    results = store.similarity_search(
+        f"main topics overview introduction background key points conclusions {source_name}",
+        k=6, threshold=0.15
+    )
     filtered = [r for r in results if source_name in (r.get("metadata") or {}).get("source", "")]
     if not filtered:
-        return f"Document '{source_name}' not found. Please check the filename."
-    combined = "\n\n".join(r["content"] for r in filtered[:6])
-    return f"Content excerpts from '{source_name}':\n\n{combined}"
+        filtered = results[:4]
+    if not filtered:
+        return f"Document '{source_name}' not found."
+    combined = "\n\n".join(r["content"][:1000] for r in filtered[:6])
+    return f"Document content from '{source_name}':\n\n{combined}"
 
-# SYSTEM_PROMPT = """You are DocMind, an expert Document Intelligence Agent. You help users understand documents and answer complex questions.
+# ── System prompt (shortened to save tokens) ──────────────────────────────────
 
-# Tools available:
-# 1. search_knowledge_base — search uploaded docs (ALWAYS try first)
-# 2. web_search — fetch live web information  
-# 3. calculator — perform math calculations
-# 4. summarise_document — summarise a specific file by name
+SYSTEM_PROMPT = """You are DocMind, an AI that answers questions from uploaded documents.
 
-# Rules:
-# - Always search the knowledge base before using general knowledge or web
-# - Cite sources like [Source: filename.pdf] when presenting document info
-# - For complex questions, use multiple tools in sequence
-# - Be thorough but concise. Use markdown formatting in responses.
-# """
+Rules:
+1. ALWAYS call search_knowledge_base first.
+2. Use ONLY document content to answer. Do NOT call web_search if KB returned content.
+3. Only call web_search if KB returns "NO_RESULTS" OR user asks for current events.
+4. Cite sources: [Source: filename.pdf]
+5. Be thorough and structured (use ## headers, bullet points, bold key terms).
+"""
 
-SYSTEM_PROMPT = """You are DocMind, an expert Document Intelligence Agent that helps users understand documents and answer complex questions.
-
-**CRITICAL INSTRUCTION FOR WEB SEARCH:**
-- **ALWAYS use the 'web_search' tool for ANY question about events, news, or situations that may have occurred after your knowledge cutoff in July 2024.**
-- **This includes questions about the current state of conflicts, wars, political developments, or any time-sensitive topic.**
-- **Do NOT rely on your internal knowledge for recent events. If you are unsure if your knowledge is current, you MUST use web_search.**
-
-**Tool Usage Guidelines:**
-1. `search_knowledge_base` - For searching uploaded documents (static, non-time-sensitive information)
-2. `web_search` - For ANY question about recent events, news, or current situations (THIS IS YOUR DEFAULT FOR CURRENT EVENTS)
-3. `calculator` - For performing mathematical calculations
-4. `summarise_document` - For generating summaries of specific uploaded files
-
-**Rules:**
-- For questions about current events, conflicts, or recent news, ALWAYS start with `web_search`.
-- Cite sources by mentioning the source domain (e.g., "According to Reuters...") when presenting information from web search results.
-- Be thorough, accurate, and use markdown formatting in your responses.
-- If a web search returns no relevant results, inform the user clearly.
-
-Remember: Your internal knowledge is outdated. For anything that sounds like a current event, use web_search first."""
+# ── Agent state ───────────────────────────────────────────────────────────────
 
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], operator.add]
 
+# ── RAGAgent with fallback on 429 ─────────────────────────────────────────────
+
 class RAGAgent:
     def __init__(self):
-        # Use ChatOpenAI with Groq endpoint – no dependency conflict
-        self.llm = ChatOpenAI(
-            model=GROQ_MODEL,
-            openai_api_key=GROQ_API_KEY,
-            openai_api_base="https://api.groq.com/openai/v1",
-            temperature=0.2,
+        # Primary: Groq (fast, but rate‑limited)
+        if GROQ_API_KEY:
+            self.primary_llm = ChatOpenAI(
+                model=GROQ_MODEL,
+                openai_api_key=GROQ_API_KEY,
+                openai_api_base="https://api.groq.com/openai/v1",
+                temperature=0.3,
+                max_retries=1,          # we handle retries manually
+                request_timeout=30,
+            )
+        else:
+            self.primary_llm = None
+
+        # Fallback: OpenRouter free models (unlimited, slower)
+        self.fallback_llm = ChatOpenAI(
+            model=LLM_MODEL,
+            openai_api_key=OPENROUTER_API_KEY or "sk-placeholder",
+            openai_api_base=OPENROUTER_BASE_URL,
+            temperature=0.3,
             max_retries=2,
-            streaming=True   # Enable native streaming from LLM
         )
-        # self.llm = ChatOpenAI(
-        #     model="openrouter/free",
-        #     openai_api_key=OPENROUTER_API_KEY,
-        #     openai_api_base="https://openrouter.ai/api/v1",
-        #     temperature=0.2
-        # )
+
         self.tools = [search_knowledge_base, web_search, calculator, summarise_document]
-        self.llm_with_tools = self.llm.bind_tools(self.tools)
         self.tool_node = ToolNode(self.tools)
         self.graph = self._build_graph()
 
+    def _call_llm_with_fallback(self, messages):
+        """Try Groq; if 429 (rate limit), fallback to OpenRouter."""
+        if self.primary_llm is None:
+            return self.fallback_llm.bind_tools(self.tools).invoke(messages)
+
+        llm_with_tools = self.primary_llm.bind_tools(self.tools)
+        try:
+            return llm_with_tools.invoke(messages)
+        except Exception as e:
+            error_str = str(e).lower()
+            if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
+                logger.warning("Groq rate limit hit, falling back to OpenRouter free model")
+                return self.fallback_llm.bind_tools(self.tools).invoke(messages)
+            raise
+
     def _build_graph(self):
         def agent_node(state: AgentState):
-            messages = state["messages"]
-            if not messages or not isinstance(messages[0], SystemMessage):
-                messages = [SystemMessage(content=SYSTEM_PROMPT)] + messages
-            response = self.llm_with_tools.invoke(messages)
+            msgs = state["messages"]
+            # Trim history to avoid token overflow
+            if len(msgs) > 12:
+                msgs = msgs[-12:]
+            if not msgs or not isinstance(msgs[0], SystemMessage):
+                msgs = [SystemMessage(content=SYSTEM_PROMPT)] + msgs
+
+            response = self._call_llm_with_fallback(msgs)
             return {"messages": [response]}
 
         def should_continue(state: AgentState) -> Literal["tools", END]:
@@ -158,30 +184,9 @@ class RAGAgent:
         final = result["messages"][-1]
         return final.content if hasattr(final, "content") else str(final)
 
-    async def stream(self, user_input: str, history: List[BaseMessage] | None = None) -> AsyncGenerator[str, None]:
-        """
-        Async generator that yields tokens as they arrive from Groq.
-        Uses the graph's astream_events to capture streaming output from the LLM.
-        """
+    async def stream(self, user_input: str, history: List[BaseMessage] | None = None):
         messages = (history or []) + [HumanMessage(content=user_input)]
-        # Add system prompt if needed
-        if not messages or not isinstance(messages[0], SystemMessage):
-            messages = [SystemMessage(content=SYSTEM_PROMPT)] + messages
-
-        # Use astream_events to get token‑by‑token output
-        async for event in self.graph.astream_events(
-            {"messages": messages},
-            version="v1",
-            config={"run_id": None}  # optional
-        ):
-            # Look for token events from the LLM (when no tool calls are being made)
-            if event["event"] == "on_chat_model_stream":
-                chunk = event["data"]["chunk"]
-                if chunk.content and not chunk.tool_calls:
-                    yield chunk.content
-            # Also handle final aggregated messages if needed (fallback)
-            elif event["event"] == "on_chain_end" and event["name"] == "agent":
-                # If streaming didn't produce tokens (e.g., tool-only flow), yield final
-                output = event["data"]["output"].get("messages", [])[-1]
-                if hasattr(output, "content") and output.content:
-                    yield output.content
+        async for event in self.graph.astream({"messages": messages}, stream_mode="values"):
+            last = event["messages"][-1]
+            if isinstance(last, AIMessage) and last.content and not getattr(last, "tool_calls", None):
+                yield last.content
